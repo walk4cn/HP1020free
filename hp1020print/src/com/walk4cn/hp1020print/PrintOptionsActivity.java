@@ -62,6 +62,11 @@ public class PrintOptionsActivity extends Activity {
     private boolean mIsPdf;
     private int mPdfPages = 1;
 
+    /** Word 转换产物：原始 HTML 与生成好的 PDF */
+    private boolean mIsDocx;
+    private String mDocxHtml;
+    private File mDocxPdf;
+
     private RadioGroup rgMode;
     private RadioGroup rgOri;
     private RadioGroup rgPaper;
@@ -202,6 +207,30 @@ public class PrintOptionsActivity extends Activity {
                                 refresh();
                             }
                         });
+                    } else if (DocxToHtml.isDocx(f)) {
+                        final File pdfOut = new File(dir, "docx.pdf");
+                        try {
+                            mDocxHtml = DocxToHtml.convert(f);
+                        } catch (final Exception e) {
+                            e.printStackTrace();
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    tvInfo.setText("读这个 Word 文件失败了：" + e.getMessage());
+                                }
+                            });
+                            return;
+                        }
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                mIsPdf = true;
+                                mIsDocx = true;
+                                setImageControlsEnabled(false);
+                                tvInfo.setText("正在把 Word 排版成 PDF…");
+                                renderPdfFromDocx(pdfOut);
+                            }
+                        });
                     } else {
                         final Bitmap b = decodeThumb(f);
                         final int[] dim = Rasterizer.probeImage(f);
@@ -296,6 +325,35 @@ public class PrintOptionsActivity extends Activity {
         }
     }
 
+    /** Word → PDF：用 WebView 排版，之后就把它当普通 PDF 走预览与打印 */
+    private void renderPdfFromDocx(final File out) {
+        if (mDocxHtml == null) return;
+        tvInfo.setText("正在把 Word 排版成 PDF…");
+        HtmlToPdf.render(this, DocxToHtml.wrap(mDocxHtml, mOpt.paper), out, mOpt.paper,
+                new HtmlToPdf.Callback() {
+                    @Override
+                    public void onDone(File pdf) {
+                        if (isFinishing()) return;
+                        mDocxPdf = pdf;
+                        List<Uri> one = new ArrayList<Uri>();
+                        one.add(Uri.fromFile(pdf));
+                        mUris = one;
+                        mPdfPages = countPdfPages(pdf);
+                        mSrcThumb = renderPdfFirstPage(pdf);
+                        tvInfo.setText("Word（已排版成 PDF，共 " + mPdfPages + " 页，"
+                                + "样式做了重新排版，不等同于 Word 原样）");
+                        refresh();
+                    }
+
+                    @Override
+                    public void onError(String msg) {
+                        if (isFinishing()) return;
+                        tvInfo.setText("Word 转换失败：" + msg
+                                + "\n可以先用 WPS 导出成 PDF 再打印。");
+                    }
+                });
+    }
+
     private Bitmap decodeThumb(File f) {
         BitmapFactory.Options bo = new BitmapFactory.Options();
         bo.inJustDecodeBounds = true;
@@ -334,7 +392,12 @@ public class PrintOptionsActivity extends Activity {
             @Override
             public void onCheckedChanged(RadioGroup group, int checkedId) {
                 readUI();
-                refresh();
+                if (mIsDocx) {
+                    /* 纸张变了要按新的 @page size 重新排版 */
+                    renderPdfFromDocx(new File(new File(getCacheDir(), "hp1020"), "docx.pdf"));
+                } else {
+                    refresh();
+                }
             }
         });
         etZoom.addTextChangedListener(new SimpleWatcher());

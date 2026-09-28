@@ -4,8 +4,9 @@
     android:versionCode="1"
     android:versionName="1.0">
 
+    <!-- 26 = Android 8.0：mammoth 用到 Optional / Stream / java.nio.file，这些 API 26 才有 -->
     <uses-sdk
-        android:minSdkVersion="21"
+        android:minSdkVersion="26"
         android:targetSdkVersion="34" />
 
     <uses-permission android:name="android.permission.INTERNET" />

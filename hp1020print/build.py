@@ -55,7 +55,7 @@ def main():
     print("=== 0) 搬到 ASCII 临时目录 (aapt2 不认中文路径) ===")
     shutil.rmtree(WORK, ignore_errors=True)
     os.makedirs(WORK)
-    for item in ("src", "res", "jniLibs"):
+    for item in ("src", "res", "jniLibs", "libs"):
         shutil.copytree(os.path.join(ROOT, item), os.path.join(WORK, item))
     shutil.copy2(os.path.join(ROOT, "AndroidManifest.xml"), WORK)
     shutil.copy2(os.path.join(ROOT, "debug.keystore"), WORK)
@@ -76,7 +76,7 @@ def main():
          "--manifest", os.path.join(WORK, "AndroidManifest.xml"),
          "-o", UNAP,
          "--java", os.path.join(BUILD, "gen"),
-         "--min-sdk-version", "21",
+         "--min-sdk-version", "26",
          "--target-sdk-version", "34",
          "--auto-add-overlay",
          "-R", os.path.join(BUILD, "res.zip")])
@@ -84,16 +84,18 @@ def main():
     print("\n[3/6] javac 编译 Java")
     srcs = glob.glob(os.path.join(WORK, "src", "**", "*.java"), recursive=True)
     srcs += glob.glob(os.path.join(BUILD, "gen", "**", "*.java"), recursive=True)
-    print("    源文件 %d 个" % len(srcs))
+    jars = glob.glob(os.path.join(WORK, "libs", "*.jar"))
+    cp = os.pathsep.join([AJ] + jars)
+    print("    源文件 %d 个，第三方 jar %d 个" % (len(srcs), len(jars)))
     run([JAVAC, "-encoding", "UTF-8", "-nowarn",
-         "-classpath", AJ,
+         "-classpath", cp,
          "-d", os.path.join(BUILD, "classes")] + srcs)
 
     print("\n[4/6] d8 -> dex")
     classes = glob.glob(os.path.join(BUILD, "classes", "**", "*.class"), recursive=True)
     run([JAVA, "-cp", LIBCP, "com.android.tools.r8.D8",
-         "--lib", AJ, "--min-api", "21",
-         "--output", os.path.join(BUILD, "dex")] + classes)
+         "--lib", AJ, "--min-api", "26",
+         "--output", os.path.join(BUILD, "dex")] + classes + jars)
 
     print("\n[5/6] 注入 dex 与原生库")
     dex = os.path.join(BUILD, "dex", "classes.dex")
