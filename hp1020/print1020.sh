@@ -14,14 +14,28 @@
 #       注意：usblp 同一时刻只允许一个写者，若设备正被占用
 #       （有打印任务），探测会返回"未知"，此时不重复灌固件。
 #
+# 堵死监测(2026-10-05 新增)：
+#       打印机中途拒收数据(缺纸/卡纸/USB 异常)时，p9100d 的写
+#       操作会永久阻塞(D 状态)，之后所有任务都进不来。实测只有
+#       重启路由器能恢复(杀进程+USB 复位救不活，本机为打印机
+#       专用路由器，重启代价可接受)。watch 每轮(约6秒)监测两个
+#       信号，任一"连续"约 1 分钟即判定堵死并自动重启：
+#         1) p9100d 进程处于 D 状态(写操作卡死在内核)
+#         2) 9100 端口连接的 Recv-Q 持续堆积 >=32KB(数据没人读)
+#       保护措施：开机后 180 秒宽限期(先让补灌链路跑完)；
+#       touch /tmp/hp1020.nostuck 可临时停用监测；
+#       touch /tmp/hp1020.dryrun 只记日志不真重启(测试用)。
+#
 # 用法：
 #   print1020.sh load   立即补灌一次（带存活校验）
 #   print1020.sh probe  只做存活探测
-#   print1020.sh watch  常驻守护(兜底轮询 + mdev 补丁自检)
+#   print1020.sh watch  常驻守护(兜底轮询 + mdev 补丁自检 + 堵死监测)
+#   print1020.sh stuckcheck  手动查看堵死信号当前值
 #
 # 部署：/etc/storage/print1020.sh   权限 0755
 #       配套 /etc/storage/sihp1020.dl 与 /etc/storage/hp1020_hotplug.sh
 #       开机启动见 /etc/storage/started_script.sh 开头的补丁块
+#       改动后必须执行 /sbin/mtd_storage.sh save，否则重启还原
 ####################################################################
 
 FW="/etc/storage/sihp1020.dl"
@@ -35,6 +49,11 @@ LOG="/tmp/hp1020.log"
 MDEVCONF="/etc/mdev.conf"
 HOOKFILE="/etc/storage/hp1020_hotplug.sh"
 LOCK_MAX=180                   # 锁最长存活秒数, 超过视为残留
+
+# 堵死监测参数
+STUCK_QBYTES=32768             # Recv-Q 堆积阈值(字节)
+STUCK_HITS=10                  # 连续命中轮数(每轮约6秒, 10轮约1分钟)
+STUCK_BOOT_GRACE=180           # 开机宽限秒数, 期间不监测
 
 log() {
     echo "$(date '+%m-%d %H:%M:%S') $*" >>"$LOG"
@@ -120,10 +139,24 @@ load_fw() {
     return 1
 }
 
+# ---------- 堵死信号采集 ----------
+# 输出一行: "<D状态 0|1> <9100连接RecvQ合计字节数>"
+stuck_signals() {
+    d=0
+    # busybox ps 的命令列含 /usr/sbin/p9100d, pidof 反而不匹配(comm 是 p910nd)
+    for p in $(ps w 2>/dev/null | grep 'p9100d' | grep -v grep | awk '{print $1}'); do
+        [ "$(awk '{print $3}' /proc/$p/stat 2>/dev/null)" = "D" ] && d=1
+    done
+    q=$(netstat -t -n 2>/dev/null | awk '$1=="tcp" && $6=="ESTABLISHED" && $4 ~ /:9100$/ {s+=$2} END{print s+0}')
+    echo "$d $q"
+}
+
 # ---------- 守护 ----------
 watch_loop() {
     mkdir "$WLOCK" 2>/dev/null || { log "守护进程已在运行, 退出"; exit 0; }
-    log "===== watch 守护启动 ====="
+    log "===== watch 守护启动 (含堵死自动重启监测: 阈值${STUCK_QBYTES}B x${STUCK_HITS}轮) ====="
+    dcnt=0
+    qcnt=0
     n=0
     while true; do
         if [ -c "$DEV" ]; then
@@ -152,6 +185,35 @@ watch_loop() {
                 [ -n "$lt" ] && [ $((now - lt)) -gt $LOCK_MAX ] && rm -rf "$LOCK" && log "清理超时残留锁"
             fi
         fi
+
+        # —— 堵死监测: 双信号连续命中约 1 分钟 => 自动重启路由器 ——
+        up=$(cut -d. -f1 /proc/uptime 2>/dev/null)
+        if [ -n "$up" ] && [ "$up" -ge $STUCK_BOOT_GRACE ] && [ ! -f /tmp/hp1020.nostuck ]; then
+            sig=$(stuck_signals)
+            # 测试钩子: 强制两个信号同时命中(配合 /tmp/hp1020.dryrun 演练)
+            [ -f /tmp/hp1020.stucktest ] && sig="1 999999"
+            d=${sig%% *}
+            q=${sig#* }
+            if [ "$d" = "1" ]; then dcnt=$((dcnt + 1)); else dcnt=0; fi
+            if [ "$q" -ge $STUCK_QBYTES ]; then qcnt=$((qcnt + 1)); else qcnt=0; fi
+            if [ $dcnt -ge $STUCK_HITS ] || [ $qcnt -ge $STUCK_HITS ]; then
+                if [ -f /tmp/hp1020.dryrun ]; then
+                    log "DRYRUN: 堵死信号达标(D连续${dcnt}轮, RecvQ ${q}B 连续${qcnt}轮), 此刻会重启路由器, 已跳过"
+                else
+                    log "打印通道堵死持续约1分钟(p9100d D状态连续${dcnt}轮 / RecvQ ${q}B 连续${qcnt}轮), 自动重启路由器"
+                    sync
+                    sleep 2
+                    reboot
+                    exit 0
+                fi
+                dcnt=0
+                qcnt=0
+            fi
+        else
+            dcnt=0
+            qcnt=0
+        fi
+
         sleep 6
     done
 }
@@ -166,6 +228,13 @@ case "$1" in
             *) echo "打印机无应答(固件可能未加载)" ;;
         esac
         ;;
+    stuckcheck)
+        sig=$(stuck_signals)
+        echo "p9100d 处于 D 状态: ${sig%% *} (1=有进程卡死在内核写)"
+        echo "9100 连接 RecvQ 合计: ${sig#* } 字节 (阈值 ${STUCK_QBYTES}B, 连续 ${STUCK_HITS} 轮约1分钟触发重启)"
+        [ -f /tmp/hp1020.nostuck ] && echo "※ 监测已手动停用 (/tmp/hp1020.nostuck 存在)"
+        [ -f /tmp/hp1020.dryrun ] && echo "※ DRYRUN 模式: 只记日志不重启"
+        ;;
     watch | "") watch_loop ;;
-    *) echo "用法: $0 {load|probe|watch}" ;;
+    *) echo "用法: $0 {load|probe|stuckcheck|watch}" ;;
 esac
