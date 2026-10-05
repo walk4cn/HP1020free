@@ -17,10 +17,21 @@ public final class Printer {
     /** 写入零进展超过此时长判定为卡死（缺纸/卡纸会让 write 永久阻塞） */
     private static final long STALL_MS = 60_000;
 
-    /** 发送文件 */
+    /** 发送文件：局域网可达就走局域网，否则自动切远程地址（DDNS 端口映射） */
     public static void send(Context ctx, File zjs) throws IOException {
         String host = Prefs.host(ctx);
         int port = Prefs.port(ctx);
+        String remoteHost = Prefs.remoteHost(ctx);
+        int remotePort = Prefs.remotePort(ctx);
+        if (!remoteHost.isEmpty() && remotePort > 0 && !probe(ctx, 1500)) {
+            /* 家里局域网 1.5 秒连不上（人在外网），走远程映射地址 */
+            host = remoteHost;
+            port = remotePort;
+        }
+        sendTo(host, port, zjs);
+    }
+
+    private static void sendTo(String host, int port, File zjs) throws IOException {
         Socket s = new Socket();
         try {
             s.connect(new InetSocketAddress(host, port), 15000);

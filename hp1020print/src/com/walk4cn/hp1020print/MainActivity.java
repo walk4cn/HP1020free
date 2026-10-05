@@ -36,6 +36,8 @@ public class MainActivity extends Activity {
     private EditText etDensity;
     private EditText etThreshold;
     private EditText etConvert;
+    private EditText etRemoteHost;
+    private EditText etRemotePort;
     private TextView tvStatus;
     private TextView tvDiag;
 
@@ -79,6 +81,11 @@ public class MainActivity extends Activity {
                 InputType.TYPE_CLASS_NUMBER);
         etConvert = addEdit(root, "文档转换服务器 URL（留空用离线排版）", Prefs.converterUrl(this),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        etRemoteHost = addEdit(root, "远程打印地址（出门在外用，DDNS 域名或 IP）",
+                Prefs.remoteHost(this), InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        etRemotePort = addEdit(root, "远程打印端口（留空/0 = 不用远程）",
+                String.valueOf(Prefs.remotePort(this) == 9100 ? 0 : Prefs.remotePort(this)),
+                InputType.TYPE_CLASS_NUMBER);
 
         Button btnSave = new Button(this);
         btnSave.setText("保存设置");
@@ -345,11 +352,12 @@ public class MainActivity extends Activity {
 
     private void save() {
         String host = etHost.getText().toString().trim();
-        int port = 9100, density = 3, threshold = 150;
+        int port = 9100, density = 3, threshold = 150, remotePort = 0;
         try {
             port = Integer.parseInt(etPort.getText().toString().trim());
             density = Integer.parseInt(etDensity.getText().toString().trim());
             threshold = Integer.parseInt(etThreshold.getText().toString().trim());
+            remotePort = Integer.parseInt(etRemotePort.getText().toString().trim());
         } catch (NumberFormatException ignored) {
         }
         if (host.isEmpty()) host = "192.168.2.120";
@@ -362,6 +370,8 @@ public class MainActivity extends Activity {
                 .putInt(Prefs.K_DENSITY, density)
                 .putInt(Prefs.K_THRESHOLD, threshold)
                 .putString(Prefs.K_CONVERT_URL, etConvert.getText().toString().trim())
+                .putString(Prefs.K_REMOTE_HOST, etRemoteHost.getText().toString().trim())
+                .putInt(Prefs.K_REMOTE_PORT, Math.max(0, remotePort))
                 .apply();
     }
 
