@@ -128,6 +128,31 @@ public class MainActivity extends Activity {
         });
         root.addView(btnPick);
 
+        /*
+         * 从文件管理器「用其他应用打开」发来的常是 file:// 路径，安卓 11+ 上
+         * 没有所有文件访问权限就读不了（App 内选文件走 SAF 的 content:// 不受影响）。
+         * 这里放一个授权入口，授权后按钮自动消失。
+         */
+        if (android.os.Build.VERSION.SDK_INT >= 30
+                && !android.os.Environment.isExternalStorageManager()) {
+            Button btnAllFiles = new Button(this);
+            btnAllFiles.setText("授权「所有文件访问」（否则文件管理器直接打开会读不了）");
+            btnAllFiles.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    try {
+                        startActivity(new Intent(
+                                android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                Uri.parse("package:" + getPackageName())));
+                    } catch (Exception e) {
+                        startActivity(new Intent(
+                                android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+                    }
+                }
+            });
+            root.addView(btnAllFiles);
+        }
+
         Button btnTest = new Button(this);
         btnTest.setText("打印测试页");
         btnTest.setOnClickListener(new View.OnClickListener() {
