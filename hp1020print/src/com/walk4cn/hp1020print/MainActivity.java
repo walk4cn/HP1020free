@@ -35,6 +35,7 @@ public class MainActivity extends Activity {
     private EditText etPort;
     private EditText etDensity;
     private EditText etThreshold;
+    private EditText etConvert;
     private TextView tvStatus;
     private TextView tvDiag;
 
@@ -76,6 +77,8 @@ public class MainActivity extends Activity {
                 InputType.TYPE_CLASS_NUMBER);
         etThreshold = addEdit(root, "二值化阈值 0–255（越小越黑）", String.valueOf(Prefs.threshold(this)),
                 InputType.TYPE_CLASS_NUMBER);
+        etConvert = addEdit(root, "文档转换服务器 URL（留空用离线排版）", Prefs.converterUrl(this),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
 
         Button btnSave = new Button(this);
         btnSave.setText("保存设置");
@@ -164,6 +167,14 @@ public class MainActivity extends Activity {
                 + "所以请走「分享」通道，别用系统打印菜单。"));
 
         setContentView(sv);
+
+        /* 通知权限（13+）：后台打印的进度通知需要它，拒绝也不影响功能 */
+        if (android.os.Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1);
+        }
+
         handleIntent(getIntent());
     }
 
@@ -325,6 +336,7 @@ public class MainActivity extends Activity {
                 .putInt(Prefs.K_PORT, port)
                 .putInt(Prefs.K_DENSITY, density)
                 .putInt(Prefs.K_THRESHOLD, threshold)
+                .putString(Prefs.K_CONVERT_URL, etConvert.getText().toString().trim())
                 .apply();
     }
 

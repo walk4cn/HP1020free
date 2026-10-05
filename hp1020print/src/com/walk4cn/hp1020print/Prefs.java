@@ -13,6 +13,8 @@ public final class Prefs {
     public static final String K_DENSITY = "density";
     public static final String K_THRESHOLD = "threshold";
     public static final String K_PAPER = "paper";
+    /** 远程文档转换服务器 URL（Gotenberg /forms/libreoffice/convert 兼容），空 = 不用 */
+    public static final String K_CONVERT_URL = "convert_url";
     /** 系统最后一次向本服务发起「打印机发现」的时间戳（诊断用） */
     public static final String K_LAST_DISCOVERY = "last_discovery";
 
@@ -50,6 +52,11 @@ public final class Prefs {
 
     public static String paper(Context c) {
         return get(c).getString(K_PAPER, PAPER_A4);
+    }
+
+    /** 文档转换服务器 URL，空字符串 = 未配置（用离线排版） */
+    public static String converterUrl(Context c) {
+        return get(c).getString(K_CONVERT_URL, "").trim();
     }
 
     /** foo2zjs 的纸张代码：9=A4, 1=Letter */

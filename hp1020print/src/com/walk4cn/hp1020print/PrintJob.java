@@ -69,7 +69,7 @@ public final class PrintJob {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                exec(app, uris, opt, st);
+                runSync(app, uris, opt, st);
             }
         }).start();
     }
@@ -93,7 +93,8 @@ public final class PrintJob {
         }).start();
     }
 
-    private static void exec(Context app, List<Uri> uris, PrintOpts opt, Status st) {
+    /** 同步执行整个任务（前台服务用；会做网络发送，不要在主线程调） */
+    public static void runSync(Context app, List<Uri> uris, PrintOpts opt, Status st) {
         File dir = new File(app.getCacheDir(), "hp1020");
         if (!dir.exists()) dir.mkdirs();
         String tag = "job" + System.currentTimeMillis();

@@ -188,6 +188,8 @@ public class PrintOptionsActivity extends Activity {
         new Thread(new Runnable() {
             @Override
             public void run() {
+                final String dispName = PrintJob.displayName(PrintOptionsActivity.this,
+                        mUris.get(0));
                 File dir = new File(getCacheDir(), "hp1020");
                 if (!dir.exists()) dir.mkdirs();
                 File f = new File(dir, "preview_src");
@@ -209,6 +211,26 @@ public class PrintOptionsActivity extends Activity {
                         });
                     } else if (DocxToHtml.isDocx(f)) {
                         final File pdfOut = new File(dir, "docx.pdf");
+                        /* 配置了转换服务器就优先远程（LibreOffice 级保真），失败自动落回离线排版 */
+                        File remote = null;
+                        final String curl = Prefs.converterUrl(PrintOptionsActivity.this);
+                        if (!curl.isEmpty()) {
+                            try {
+                                remote = RemoteConverter.convert(f, dispName, curl, pdfOut);
+                            } catch (final Exception re) {
+                                re.printStackTrace();
+                                runOnUiThread(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        tvInfo.setText("转换服务器不可用，改用离线排版…");
+                                    }
+                                });
+                            }
+                        }
+                        if (remote != null) {
+                            adoptRemotePdf(pdfOut);
+                            return;
+                        }
                         try {
                             mDocxHtml = DocxToHtml.convert(f);
                         } catch (final Exception e) {
@@ -231,6 +253,24 @@ public class PrintOptionsActivity extends Activity {
                                 renderPdfFromDocx(pdfOut);
                             }
                         });
+                    } else if (!Prefs.converterUrl(PrintOptionsActivity.this).isEmpty()
+                            && RemoteConverter.isConvertible(f, dispName)) {
+                        /* 老式 doc/xls/ppt 等离线路径不支持，只能走转换服务器 */
+                        final File pdfOut = new File(dir, "remote.pdf");
+                        try {
+                            RemoteConverter.convert(f, dispName,
+                                    Prefs.converterUrl(PrintOptionsActivity.this), pdfOut);
+                        } catch (final Exception e) {
+                            e.printStackTrace();
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    tvInfo.setText("转换服务器不可用：" + e.getMessage());
+                                }
+                            });
+                            return;
+                        }
+                        adoptRemotePdf(pdfOut);
                     } else {
                         final Bitmap b = decodeThumb(f);
                         final int[] dim = Rasterizer.probeImage(f);
@@ -260,6 +300,28 @@ public class PrintOptionsActivity extends Activity {
                 }
             }
         }).start();
+    }
+
+    /** 转换服务器返回的 PDF：直接当普通 PDF 接入预览与打印（切纸张不需要重转） */
+    private void adoptRemotePdf(final File pdfOut) {
+        final int pages = countPdfPages(pdfOut);
+        final Bitmap thumb = renderPdfFirstPage(pdfOut);
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (isFinishing()) return;
+                mIsPdf = true;
+                mIsDocx = false;
+                mPdfPages = pages;
+                mSrcThumb = thumb;
+                List<Uri> one = new ArrayList<Uri>();
+                one.add(Uri.fromFile(pdfOut));
+                mUris = one;
+                setImageControlsEnabled(false);
+                tvInfo.setText("已由转换服务器排版成 PDF（LibreOffice 排版，共 " + pages + " 页）");
+                refresh();
+            }
+        });
     }
 
     private boolean head5(File f) throws Exception {
@@ -542,19 +604,16 @@ public class PrintOptionsActivity extends Activity {
     private void doPrint() {
         readUI();
         if (cbRemember.isChecked()) mOpt.save(this);
-        tvStatus.setText("已开始，见下面状态…");
+        /* 转前台服务：离开发App/锁屏/ColorOS 清后台都不影响发送，通知栏有进度 */
+        PrintForegroundService.start(this, new ArrayList<Uri>(mUris), mOpt);
+        tvStatus.setText("已转入后台打印，可在通知栏查看进度");
         setResult(RESULT_OK);
-        PrintJob.run(this, mUris, mOpt, new PrintJob.Status() {
+        new android.os.Handler().postDelayed(new Runnable() {
             @Override
-            public void set(final String s) {
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        tvStatus.setText(s);
-                    }
-                });
+            public void run() {
+                finish();
             }
-        });
+        }, 1200);
     }
 
     /* ------------------------------ UI ------------------------------ */
